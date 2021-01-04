@@ -1,0 +1,412 @@
+---
+title: "ReviewPaper.Data"
+author: "Efstathios Vlachavas"
+date: "10/5/2020"
+output: html_document
+---
+
+### See vignette 
+
+https://www.bioconductor.org/packages/release/data/experiment/vignettes/curatedTCGAData/inst/doc/curatedTCGAData.html#3_Caveats_for_working_with_TCGA_data 
+
+
+## Not all TCGA samples are cancer, there are a mix of samples in each of the 33 cancer types. Use sampleTables on the MultiAssayExperiment object along with data(sampleTypes, package = "TCGAutils") to see what samples are present in the data. There may be tumors that were used to create multiple contributions leading to technical replicates. These should be resolved using the appropriate helper functions such as mergeReplicates. Primary tumors should be selected using TCGAutils::TCGAsampleSelect and used as input to the subsetting mechanisms. See the “Samples in Assays” section of this vignette.
+
+
+
+LUAD DATASET CODE FOR GITHUB AND FINAL ANALYSIS DRAFT
+
+```{r}
+
+# check the latest version to run directly with basilisk github brunch without installing separate conda environments
+
+BiocManager::install(c("MultiAssayExperiment", "curatedTCGAData", "TCGAutils",
+"DESeq2","M3C"))
+
+install.packages(c("devtools","data.table","tidyverse","UpSetR"))
+
+devtools::install_github("bioFAM/MOFA2", build_opts = c("--no-resave-data --no-build-vignettes"))
+
+
+library(MultiAssayExperiment)
+library(curatedTCGAData)
+library(TCGAutils)
+library(UpSetR)
+library(DESeq2)
+library(M3C)
+library(MOFA2)
+library(data.table)
+library(tidyverse)
+
+curatedTCGAData(diseaseCode = "LUAD", assays = "*", dry.run = TRUE)
+
+luad.mae<- curatedTCGAData(
+
+    diseaseCode = "LUAD",
+
+    assays = c(
+
+       "RPPAArray","Mutation",
+       "RNASeq2GeneNorm", # here perhaps the raw RSEM counts
+       "GISTIC_ThresholdedByGene"
+
+    ),
+
+    dry.run = FALSE
+
+)
+
+upsetSamples(luad.mae)
+
+rag <- "LUAD_Mutation-20160128"
+genome(luad.mae[[rag]]) <- translateBuild(genome(luad.mae[[rag]]))
+seqlevelsStyle(luad.mae[[rag]]) <- "UCSC"
+genome(luad.mae[[rag]])
+
+luad.updated <- qreduceTCGA(luad.mae, keep.assay = FALSE) # dont keep the original muts
+
+sampleTypes
+sampleTables(luad.updated)
+
+tums <- TCGAsampleSelect(colnames(luad.updated), "01")
+luad.processed <- luad.updated[, tums, ]
+
+luad.final <- mergeReplicates(intersectColumns(luad.processed))
+
+
+# normalize and filter accordingly any included molecular layers
+rna.matrix <- assay(luad.final[[2L]]) # this for each layer
+cnas.matrix <- assay(luad.final[[1L]])
+snvs.matrix <- assay(luad.final[[4L]])
+protein.dat <- assay(luad.final[[3L]])
+
+rna.seq <- getWithColData(luad.final, 2L)
+count.dat <- assay(rna.seq)
+pheno.dat <- colData(rna.seq)
+
+# If you have a matrix of RSEM values, the way to use the above workflow would be to import counts and lengths and construct a dds object from these. The counts (not scaled) can be rounded to integers and passed to DESeqDataSetFromMatrix. 
+
+dds <- DESeqDataSetFromMatrix(countData = round(count.dat),
+                                 colData = pheno.dat,
+                                 design = ~ 1)
+# optional filtering just to remove genes with 0 counts in all samples
+keep <- rowSums(counts(dds)) > 1
+dds <- dds[keep,]
+nrow(dds)
+
+dds.norm <- vst(dds) # re-check
+
+
+NotExpressed <- apply( assay(dds.norm), MARGIN=2, function( z ){
+  dens <- density( z )
+  expr.cut <- dens$x[ which.max( dens$y )]
+    return( z < expr.cut )
+} )
+
+# that way you'll get a boolean matrix with the columns corresponding to the rna-seq samples, the rows to the genes and the elements being TRUE if the expression value is lower than the cut-off value for that arrays, and FALSE otherwise. I would use such a logical matrix instead of the index that you used above because you can do then something like the code below:
+
+expr.ps <- rowSums( !NotExpressed ) > ( ncol( NotExpressed )/2 ) # for example 30% of the non-expressed or >=64/2
+dds.filtered <- dds.norm[expr.ps,  ]
+
+# so you could filter your dataset to keep all those probe sets that have an expression value larger than the cut-off value you defined above (i.e. are presumably expressed) in at least half of the samples of your data set.
+
+# extra filtering regarding variance
+
+filtered_results <- featurefilter(assay(dds.filtered), percentile=40, method='MAD', topN=10000)
+
+filtered.exp.final <- as.matrix(filtered_results$filtered_data)
+
+keep.mut <- rownames(assay(dds.filtered))
+
+keep.mut.final <- rownames(filtered.exp.final)
+# then further keep the overlapping genes with the CNAs and the somatic point mutations
+
+common.cnas <- intersect(rownames(cnas.matrix),keep.mut.final)
+common.muts <- intersect(rownames(snvs.matrix),keep.mut.final)
+
+cnas.sel <- cnas.matrix[common.cnas,] # for example there is TP53 in CNAs
+mut.sel <- snvs.matrix[common.muts,] # also but with 0s
+
+protein.dat.fil <- na.omit(protein.dat)
+
+###############################################################################
+###############################################################################
+# Change the mutational matrix table of genes as selected clinical covariates
+# count(Gene_Symbol,XTENS_name,sort = T)
+
+to.plot <- data.table(mutation = rownames(mut.sel),
+frequency = rowMeans(mut.sel,na.rm=T)) # perhaps filter based on the total frequency-for example, < than 2%
+
+pass.freq <- to.plot[to.plot$frequency>=0.01,]
+pass.freq.genes <- pass.freq$mutation
+
+# Start from above after creating to.plot data frame 
+
+freq.mut.wes <- to.plot[order(to.plot$frequency,decreasing = T),][1:100]
+# write_tsv(freq.mut.wes,"TOP100.Freq.Mut.WES.MASTER.txt")
+
+ggplot(freq.mut.wes, aes(x=reorder(mutation,-frequency), y=frequency)) + 
+  geom_bar(stat = "identity") +
+  theme_classic() + 
+  labs(x="", y="Frequency") +
+  theme(
+    axis.text.x = element_text(colour="black",size=rel(0.7), angle=90, hjust=1, vjust=0.5),  
+  ) # needs much smaller number of genes to work for the x-axis
+
+
+##########################################################################
+# approach to implement mutations in selected genes as only clinical metadata with the rest of the phenotype clinical data information for the common samples between WES & RNASeq
+
+# The alternative option is to use the https://www.intogen.org/search?cancer=LUAD link of the Compedium of Mutational Cancer Driver Genes
+# https://doi.org/10.1038/s41568-020-0290-x 
+
+setwd("C:/Users/e376s/Desktop/trial.review.MOFA")
+
+
+# read also the genomic cancer signatures
+
+intogen.luad <- read_tsv("IntOGen-DriverGenes_LUAD.tsv")
+intogen.luad.genes <- intogen.luad$Symbol
+
+# read the cancer census genes list from COSMIC 
+cosmic.census.broad <- read_tsv("Census_allMon Dec 14 12_02_03 2020.tsv")
+cosmic.census.genes <- cosmic.census.broad$`Gene Symbol`
+
+sel.mut <- intersect(freq.mut.wes$mutation,cosmic.census.genes) # with top100
+sel.mut.2 <- intersect(freq.mut.wes$mutation,intogen.luad.genes)
+
+mut.sel.final <- mut.sel[sel.mut,]
+
+mutations.dat <- data.frame(t(mut.sel.final)) # 181 samples and change the names
+
+# "TCGA-05-4249-01A-01D-1105-08"
+
+fullBarcodes <- rownames(mutations.dat)
+sample_ids <- TCGAbarcode(fullBarcodes)
+rownames(mutations.dat) <- sample_ids
+
+# the check and align that the sample names have the same order between the selected mutations and the clinical data, in order to create a final data frame of available clinical metadata
+
+# use the updated clinical data frame from above *final.clin.dat*
+
+# Phenodata comments: These are artifacts of the merged clinical datasets. For each cancer, we included the Clinical Supplement data with the Clinical_Pick_Tier1 data. See here for more information: https://broadinstitute.atlassian.net/wiki/spaces/GDAC/pages/844334346/Documentation#Documentation-ClinicalPipelineClinicalDataProcessing 
+
+
+# general comment for the clinical variables: These variables come from the Broad GDAC Firehose so I would look for the documentation and try to make out why these variables are different. They could have been taken at different time points. Generally it's preferable to have less NA values but the provenance of those variables have to be taken into account as they're not necessarily "duplicated".
+
+clin.dat <- as.data.frame(colData(luad.final))
+
+clinical.filtered <- clin.dat %>% 
+select(c(patientID, years_to_birth, vital_status, pathologic_stage, pathology_T_stage, pathology_N_stage,
+gender, radiation_therapy, histological_type,
+patient.clinical_cqcf.anatomic_neoplasm_subdivision,  patient.tobacco_smoking_history,
+days_to_death,days_to_last_followup, days_to_last_known_alive,
+expression_subtype)) 
+
+
+staget <- sub("[abcd]","",sub("t","",clinical.filtered$pathology_T_stage))
+staget <- suppressWarnings(as.integer(staget))
+clinical.filtered$pathology_T_stage <- staget
+
+
+identical(rownames(clinical.filtered),rownames(mutations.dat))
+
+# optional to sort/match the same row
+mut.dat.ordered <- mutations.dat[clinical.order,]
+
+final.clin.dat <- bind_cols(clinical.filtered,mutations.dat)
+
+colData(luad.final) <- S4Vectors::DataFrame(final.clin.dat) # # where DF is the filtered / cleaned clinical `S4Vectors::DataFrame` with only the "interesting" clinical variables. It only works with a `DataFrame`'value'. It currently does not work with `data.frame`s or `tibble`s
+
+
+write_tsv(final.clinical.mut,"Clinical.MOFA.RNASeqOnly.36Mutations.txt")
+
+###############################################################################
+###############################################################################
+###############################################################################
+
+luad2 <- c(luad.final, list(RNAseq = filtered.exp.final), mapFrom = "LUAD_RNASeq2GeneNorm-20160128") # for a separate assay to be added and mapped from a previous one-this for the rna-seq in order not to loss the sampleNames
+
+sel.mae <- luad2[,,c(1,3,5)]
+# use the single bracket method ([) in conjunction with a List/list or ExperimentList of the same length as the subsetting vector-can handle multiple replacements.
+
+sel.mae[, , c(1,2)] <- list(CNV = cnas.sel, RPPA=protein.dat.fil) # for the expression data will not work if used getWithColData, as it takes only the TCGA barcodes
+
+
+##################################################################################
+# Modify some of the assays
+
+e <- assays(sel.mae)
+e[[2]] %>% as.matrix -> e[[2]]
+# Rename features so that there are no duplicates
+paste('gistic', e[[1]] %>% rownames, sep='_') -> rownames(e[[1]])
+paste('rppa', e[[2]] %>% rownames, sep='_') -> rownames(e[[2]])
+paste('rna', e[[3]] %>% rownames, sep='_') -> rownames(e[[3]])
+
+mae <- MultiAssayExperiment(experiments=e, colData = colData(sel.mae), sampleMap = sampleMap(sel.mae))
+
+names(mae) <- c("CNV","RPPA","RNASeq")
+
+# MOFA
+
+
+```
+
+RUN THE FINAL MULTI-OMICS DATASET WITH MOFA2 computational workflow
+
+```{r}
+
+
+MOFAobject <- create_mofa(mae,save_metadata=T)
+
+plot_data_overview(MOFAobject)
+
+data_opts <- get_default_data_options(MOFAobject)
+data_opts
+
+model_opts <- get_default_model_options(MOFAobject) # likelihood per view (options are “gaussian”, “poisson”, “bernoulli”). By default they are inferred automatically.
+model_opts$num_factors <- 15
+
+train_opts <- get_default_training_options(MOFAobject)
+train_opts$convergence_mode <- "medium" # For exploration, the fast mode is good enough.
+
+# train the MOFA object
+
+MOFAobject <- prepare_mofa(MOFAobject,
+  data_options = data_opts,
+  model_options = model_opts,
+  training_options = train_opts
+)
+
+
+outfile = file.path(getwd(),"caseStudy.Finalmodel.LUAD.hdf5")
+MOFAobject.trained <- run_mofa(MOFAobject, outfile, use_basilisk = TRUE)
+
+# Load precomputed model
+
+# http://www.ebi.ac.uk/shiny/mofa/
+
+model <- load_model("model.hdf5")
+
+views_names(model) <- c("CNV","RPPAArray","RNASeq")
+
+# Sanity check
+# stopifnot(all(sort(CLL_metadata$sample)==sort(unlist(samples_names(MOFAobject)))))
+
+
+slotNames(MOFAobject.trained)
+
+names(MOFAobject@data) # change names
+
+# EDA PHASE_1-Correlation between factors-A good sanity check is to verify that the Factors are largely uncorrelated. In MOFA there are no orthogonality constraints such as in Principal Component Analysis, but if there is a lot of correlation between Factors this suggests a poor model fit. Reasons? Perhaps you used too many factors or perhaps the normalisation is not adequate.
+
+plot_factor_cor(MOFAobject.trained)
+
+# EDA PHASE_2-Variance decomposition by Factor-The most important insight that MOFA generates is the variance decomposition analysis. This plot shows the percentage of variance explained by each factor across each data modality (and group, if provided). It summarises the sources of variation from a complex heterogeneous data set in a single figure.
+
+plot_factor_cor(MOFAobject.trained)
+plot_variance_explained(MOFAobject.trained, max_r2=10)
+plot_variance_explained(MOFAobject.trained, plot_total = T)[[2]]
+
+
+correlate_factors_with_covariates(MOFAobject.trained, 
+  covariates = c("AKAP9","ATM","BCORL1","CNTNAP2","COL3A1","EGFR","EPHA3","FAT4", "MET","NBEA","NF1","PDGFRA","SETBP1","expression_subtype","pathology_T_stage",
+"patient.tobacco_smoking_history"), 
+  plot="log_pval"
+)
+
+plot_weights(model, view = "CNV", factor = 3, nfeatures = 10, scale = T,text_size = 1)
+
+plot_weights(MOFAobject.trained,
+ view = "LUAD_GISTIC_ThresholdedByGene-20160128",
+ factor = 3,
+ nfeatures = 20,     # Top number of features to highlight
+ scale = T           # Scale weights from -1 to 1
+) # ISSUE with this specific view-re-load the trained object and run again
+
+plot_top_weights(MOFAobject.trained,
+view = "RNAseq",
+factor = 1,
+nfeatures = 20,     # Top number of features to highlight
+scale = T) 
+
+plot_top_weights(MOFAobject.trained,
+view = "LUAD_RPPAArray-20160128",
+factor = 1,
+nfeatures = 20,     # Top number of features to highlight
+scale = T) 
+
+plot_factor(MOFAobject.trained, 
+  factor = 1:3,
+  color_by = "expression_subtype",
+  shape_by = "ATM"
+)
+
+plot_factor(MOFAobject.trained,factor=2, color_by="ATM", dodge = T, add_violin=T, add_boxplot=T)
+
+plot_factor(MOFAobject.trained,factor=1, color_by="expression_subtype", dodge = T, add_violin=T, add_boxplot=T) 
+
+# summarise_factors---create a data.frame with columns “samples” and “levels” where levels correspond to entity_AS, no groups arguments
+
+plot_data_scatter(MOFAobject.trained, 
+  view = "RNAseq",
+  factor = 1,  
+  features = 4,
+  sign = "positive",
+  color_by = "expression_subtype"
+) + labs(y="RNA expression")
+
+
+
+```
+
+For downstream enrichment analysis of selected factors/features
+
+```{r}
+
+library(msigdbr)
+
+msgidb.matrix <- msigdbr(
+  species = "Homo sapiens",
+  category = "C2", 
+  subcategory = "REACTOME"
+  ) %>% as.data.table %>% .[,id:=1] %>%
+  dcast(gs_name~gene_symbol, value.var="id", fill=0) %>% 
+  matrix.please
+
+paste('rna', e[[3]] %>% rownames, sep='_') -> rownames(e[[3]])
+
+features_names(model)[["RNA"]] <- toupper(features_names(model)[["RNA"]])
+head(features_names(model)[["RNA"]])
+
+# GSEA on positive weights
+gsea.positive <- run_enrichment(mofa, 
+  feature.sets = msgidb.matrix, 
+  view = "RNA",
+  sign = "positive"
+)
+
+# GSEA on negative weights
+gsea.negative <- run_enrichment(mofa, 
+  feature.sets = msgidb.matrix, 
+  view = "RNA",
+  sign = "negative"
+)
+
+plot_enrichment(gsea.positive, factor = 1, max.pathways = 15)
+plot_enrichment(gsea.negative, factor = 1, max.pathways = 15)
+
+plot_enrichment_detailed(gsea.positive,
+  factor = 1,
+  max.genes = 10,
+  max.pathways = 5
+)
+
+
+```
+
+
+
+
+
+
