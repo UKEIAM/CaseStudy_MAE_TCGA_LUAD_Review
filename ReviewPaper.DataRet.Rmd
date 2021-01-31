@@ -2,7 +2,7 @@
 title: "Unsupervised multimodal data integration case study with MOFA+"
 author: "Efstathios Iason Vlachavas"
 output: html_document
-affiliation: "European Bioinformatics Institute, Cambridge, UK"
+affiliation: "German Cancer Research Center (DKFZ), Heidelberg"
 email: "Efstathios-Iason.Vlachavas@dkfz-heidelberg.de", "svlachavas@eie.gr"
 date: "`r Sys.Date()`"
 ---
