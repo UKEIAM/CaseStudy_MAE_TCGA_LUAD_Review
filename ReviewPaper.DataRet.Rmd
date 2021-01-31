@@ -152,6 +152,7 @@ ggplot(freq.mut.wes, aes(x=reorder(mutation,-frequency), y=frequency)) +
 
 
 # Then the final step for the somatic mutations is to perform a simple overlap analysis between the aforementioned top100 genes with the list of COSMIC Cancer Gene Census:
+# https://cancer.sanger.ac.uk/census
 
 mydir <- getwd() # folder or dir where the COSMIC txt file has been downloaded
 setwd(mydir)
@@ -430,14 +431,6 @@ plot(1:k.max, wss,
      xlab="Number of clusters K",
      ylab="Total within-clusters sum of squares")
 
-# second option Nbclust
-library(NbClust)
-
-nb <- NbClust(data, diss=NULL, distance = "euclidean", 
-              min.nc=2, max.nc=6, method = "kmeans", 
-              index = "all", alphaBeale = 0.1)
-hist(nb$Best.nc[1,], breaks = max(na.omit(nb$Best.nc[1,])))
-
 
 # We will continue with Monte Carlo Reference-based Consensus Clustering
 library(M3C)
@@ -528,7 +521,7 @@ patient.tobacco_smoking_history=="current smoker"~"Active or former",
 TRUE~patient.tobacco_smoking_history
 )) %>% dplyr::rename(Smoking_Status=patient.tobacco_smoking_history)
 
-# COL3A1, AKAP9, gender and expression_subtype significant based on the following test example
+# COL3A1, AKAP9, gender and expression_subtype significant based on the following chi-square test for independence
 
 chifit <- suppressWarnings(chisq.test(table(pdat_sel[c("groups_km_LF","gender")])))
 contrib <- 100*chifit$residuals^2/chifit$statistic
@@ -563,12 +556,10 @@ cf2 <- colorRamp2(c(-2,-1,0,1,2),c("blue","navy","white","orange","red"))
 
 ha_test <- HeatmapAnnotation(df=pdat_sel) # take and run by default all columns
 
-# define manually the colors for each clinical covariate
+# define manually the colors for each selected clinical covariate
 
 mutation_col = structure(names = c("MUT", "WT"), 
     c("black", "white"))
-
-# Smoking_Status=structure(names=c("current smoker","lifelong non-smoker", "RS <= 15_years","RS > 15_years","NA"),c("#ca0020","black", "#a6dba0","#008837","#f7f7f7"
 
 ha = HeatmapAnnotation(
     AKAP9_mut = ifelse(pdat_sel[[1]] == 1, "MUT","WT"),
@@ -604,6 +595,8 @@ show_column_names = FALSE,col=f3,row_names_gp = gpar(fontsize = 9),row_title = "
 
 ht_list = ht1 %v% ht2 %v% ht3
 
+tiff("Complex.Heatmaps.MOFA.tiff", width = 12, height = 8, units = 'in', res = 300)
+
 draw(ht_list, row_title ="Multi-omics selected MOFA features",
     annotation_legend_side = "left", heatmap_legend_side = "left") # right
 
@@ -623,16 +616,6 @@ for(an in names(annotation_titles)) {
     })
 }
 
-# unit(+24, "cm")
-
-draw(ht_list, ht_gap = unit(c(6, 2), "mm"))
-
-
-############## save in an external file directly ###############################
-
-tiff("heatmap.check.tiff", width = 12, height = 8, units = 'in', res = 300)
-
-# above chunk
 
 dev.off()
 
