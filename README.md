@@ -1,2 +1,3 @@
-# Case_Study_MAE_TCGA
-Case study how to perform Multi-omics cancer data integration and analysis starting from MultiAssayExperiments 
+# Case study for Review Paper: "Evaluation of multi-omics methodologies and tools for identification of putative biomarkers and causal molecular networks in translational cancer research"
+
+Reproducible workflow on how to perform Multi-omics cancer data integration with an unsupervised approach-MOFA+
