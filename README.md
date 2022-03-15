@@ -6,7 +6,8 @@ Reproducible workflow on how to perform Multi-omics cancer data integration with
 You have two options for preparing the environment for the script:
 
 1. Use the prepared Docker container in *.devcontainer*.
-2. Create the environment manually: ```
+2. Create the environment manually with something like the following (expect neither pitty nor help). You may install additional dependencies, too: 
+```
 BiocManager::install(c(
     "MultiAssayExperiment", "curatedTCGAData", "TCGAutils",
     "DESeq2", "M3C", "TxDb.Hsapiens.UCSC.hg19.knownGene", "org.Hs.eg.db"
