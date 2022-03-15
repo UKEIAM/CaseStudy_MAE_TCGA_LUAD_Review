@@ -64,6 +64,8 @@ RUN apt-get update \
     && export DEBIAN_FRONTEND=noninteractive \
     && apt-get -y install --no-install-recommends libbz2-dev liblzma-dev
 
-RUN install2.r --error --skipinstalled --ncpus -1 BiocManager devtools data.table tidyverse UpSetR \
+# Install MOFA2 automatically
+RUN pip install mofapy2 \
+    && install2.r --error --skipinstalled --ncpus -1 BiocManager devtools data.table tidyverse UpSetR \
     && R --vanilla -s -e 'BiocManager::install(c("MultiAssayExperiment", "curatedTCGAData", "TCGAutils", "DESeq2", "M3C", "TxDb.Hsapiens.UCSC.hg19.knownGene", "org.Hs.eg.db"))' \
     && R --vanilla -s -e 'devtools::install_github("bioFAM/MOFA2", build_opts = c("--no-resave-data --no-build-vignettes"))'
