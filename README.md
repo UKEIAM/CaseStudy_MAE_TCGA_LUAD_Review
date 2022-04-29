@@ -3,6 +3,8 @@
 Reproducible workflow on how to perform Multi-omics cancer data integration with an unsupervised approach-MOFA+
 
 ## Usage
+
+### Locally
 You have two options for preparing the environment for the script:
 
 1. Use the prepared Docker container in *.devcontainer*.
@@ -17,3 +19,6 @@ install.packages(c("devtools", "data.table", "tidyverse", "UpSetR"))
 
 devtools::install_github("bioFAM/MOFA2", build_opts = c("--no-resave-data --no-build-vignettes"))
 ```
+
+### On Jupyter Hub
+Just build using the *Dockerfile* and stick to the information [online](https://jupyter-docker-stacks.readthedocs.io/en/latest/index.html).
