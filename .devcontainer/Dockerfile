@@ -66,6 +66,6 @@ RUN apt-get update \
 
 # Install MOFA2 automatically
 RUN pip install mofapy2 \
-    && install2.r --error --skipinstalled --ncpus -1 BiocManager devtools data.table tidyverse UpSetR msigdbr circlize dplyr RColorBrewer survival survminer \
+    && install2.r --error --skipinstalled --ncpus -1 BiocManager devtools data.table tidyverse UpSetR msigdbr circlize dplyr RColorBrewer survival survminer GGally \
     && R --vanilla -s -e 'BiocManager::install(c("MultiAssayExperiment", "curatedTCGAData", "TCGAutils", "DESeq2", "M3C", "TxDb.Hsapiens.UCSC.hg19.knownGene", "org.Hs.eg.db", "ComplexHeatmap"))' \
     && R --vanilla -s -e 'devtools::install_github("bioFAM/MOFA2", build_opts = c("--no-resave-data --no-build-vignettes"))'
