@@ -16,6 +16,7 @@ RUN mamba install --quiet --yes \
     'r-rcolorbrewer' \
     'r-survival' \
     'r-ggally' \
+    'r-psych' \
     'r-survminer' && \
     mamba clean --all -f -y && \
     fix-permissions "${CONDA_DIR}" && \
